@@ -1,0 +1,931 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#000">
+<title>AI Object Scanner</title>
+
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js"></script>
+
+<style>
+*{box-sizing:border-box}
+html,body{
+  margin:0;width:100%;height:100%;
+  background:#000;color:#fff;
+  font-family:system-ui,sans-serif
+}
+button{border:0;cursor:pointer}
+
+.camera{
+  position:fixed;inset:0;
+  overflow:hidden;background:#000
+}
+
+video,canvas{
+  position:absolute;inset:0;
+  width:100%;height:100%;
+  object-fit:cover
+}
+
+canvas{pointer-events:none}
+
+.shade{
+  position:absolute;inset:0;
+  pointer-events:none;
+  background:linear-gradient(
+    #0009,transparent 25%,
+    transparent 65%,#000b
+  )
+}
+
+.top{
+  position:absolute;
+  z-index:3;
+  top:max(18px,env(safe-area-inset-top));
+  left:16px;right:16px;
+  display:flex;
+  justify-content:space-between
+}
+
+.brand,.status,.action,.permission,.panel,.logs{
+  background:#0008;
+  backdrop-filter:blur(12px);
+  -webkit-backdrop-filter:blur(12px)
+}
+
+.brand,.status{
+  padding:8px 12px;
+  border-radius:99px;
+  font-weight:800
+}
+
+.brand{font-size:14px}
+.status{font-size:10px}
+
+.actions{
+  position:absolute;
+  z-index:3;
+  right:12px;
+  top:50%;
+  transform:translateY(-50%);
+  display:grid;
+  gap:10px
+}
+
+.action{
+  width:58px;
+  height:64px;
+  border:1px solid #fff3;
+  border-radius:17px;
+  color:#fff;
+  font-weight:800;
+  font-size:9px
+}
+
+.action b{
+  display:block;
+  font-size:21px;
+  margin-bottom:3px
+}
+
+.action.on{
+  background:#ec489955;
+  border-color:#ec4899
+}
+
+.bottom{
+  position:absolute;
+  z-index:3;
+  left:18px;
+  right:86px;
+  bottom:max(18px,env(safe-area-inset-bottom));
+  font-size:11px
+}
+
+.bottom strong{
+  display:block;
+  font-size:15px;
+  margin:3px 0
+}
+
+.live{color:#ddd}
+
+.start{
+  position:absolute;
+  z-index:4;
+  left:50%;
+  bottom:34px;
+  transform:translateX(-50%);
+  padding:15px 22px;
+  border-radius:99px;
+  background:#fff;
+  color:#111;
+  font-weight:900
+}
+
+.hidden{display:none!important}
+
+.permission-wrap{
+  position:fixed;
+  z-index:99;
+  inset:0;
+  display:grid;
+  place-items:center;
+  padding:22px;
+  background:#000e
+}
+
+.permission-wrap.hide{display:none}
+
+.permission{
+  width:min(360px,100%);
+  padding:26px 20px;
+  border:1px solid #fff2;
+  border-radius:24px;
+  text-align:center
+}
+
+.permission-icon{font-size:38px}
+
+.permission h2{
+  margin:10px 0 8px
+}
+
+.permission p{
+  color:#bbb;
+  font-size:13px;
+  line-height:1.5
+}
+
+.permission button{
+  width:100%;
+  padding:15px;
+  border-radius:14px;
+  font-weight:900
+}
+
+.error{
+  color:#ff9aaa!important;
+  font-size:11px!important
+}
+
+.panel{
+  position:fixed;
+  z-index:10;
+  left:12px;
+  right:82px;
+  bottom:100px;
+  padding:10px;
+  border-radius:16px;
+  font-size:10px
+}
+
+.panel input{width:100%}
+
+.panel .row{
+  display:flex;
+  gap:7px;
+  align-items:center
+}
+
+.panel button{
+  padding:9px 12px;
+  border-radius:10px;
+  background:#fff;
+  color:#111;
+  font-weight:800
+}
+
+.logs{
+  position:fixed;
+  z-index:11;
+  left:12px;
+  right:82px;
+  top:80px;
+  max-height:30vh;
+  overflow:auto;
+  padding:8px;
+  border-radius:14px;
+  font-size:10px
+}
+
+.log{
+  padding:7px;
+  border-bottom:1px solid #fff2
+}
+</style>
+</head>
+
+<body>
+
+<div class="camera">
+
+  <video id="video" autoplay playsinline muted></video>
+  <canvas id="canvas"></canvas>
+  <div class="shade"></div>
+
+  <div class="top">
+    <div class="brand">AI Camera</div>
+    <div id="status" class="status">Kamera OFF</div>
+  </div>
+
+  <div class="actions">
+
+    <button id="switch" class="action">
+      <b>↻</b>
+      Switch
+    </button>
+
+    <button id="flash" class="action">
+      <b>⚡</b>
+      Flash
+    </button>
+
+    <button id="ai" class="action">
+      <b>AI</b>
+      AI
+    </button>
+
+  </div>
+
+  <div class="bottom">
+
+    <span class="live">DETEKSI</span>
+
+    <strong id="count">
+      0 objek
+    </strong>
+
+    <span id="hint">
+      Izinkan kamera lalu tekan AI.
+    </span>
+
+  </div>
+
+  <button id="start" class="start">
+    ● Buka Kamera
+  </button>
+
+</div>
+
+
+<div id="permission" class="permission-wrap">
+
+  <div class="permission">
+
+    <div class="permission-icon">
+      📷
+    </div>
+
+    <h2>
+      Akses Kamera
+    </h2>
+
+    <p>
+      Izinkan kamera untuk menggunakan AI Object Scanner.
+    </p>
+
+    <button id="allow">
+      Izinkan Kamera
+    </button>
+
+    <p id="error" class="error"></p>
+
+  </div>
+
+</div>
+
+
+<div class="panel">
+
+  <div class="row">
+
+    <label>
+      Confidence
+      <b id="confText">60%</b>
+
+      <input
+        id="conf"
+        type="range"
+        min="30"
+        max="90"
+        value="60"
+      >
+    </label>
+
+    <button id="load">
+      Muat Model AI
+    </button>
+
+    <button id="export">
+      CSV
+    </button>
+
+  </div>
+
+</div>
+
+
+<div id="logs" class="logs"></div>
+
+
+<script>
+
+const $ = id => document.getElementById(id);
+
+const v = $("video");
+const c = $("canvas");
+const x = c.getContext("2d");
+
+
+const targets = [
+  "mouse",
+  "keyboard",
+  "cell phone",
+  "book",
+  "scissors",
+  "laptop",
+  "person"
+];
+
+
+const names = {
+  "mouse":"Mouse",
+  "keyboard":"Keyboard",
+  "cell phone":"HP",
+  "book":"Buku",
+  "scissors":"Gunting",
+  "laptop":"Laptop",
+  "person":"Orang"
+};
+
+
+const S = {
+  stream:null,
+  model:null,
+  ai:false,
+  busy:false,
+  torch:false,
+  facing:"environment",
+  conf:.6,
+  logs:[]
+};
+
+
+const secure = () =>
+  location.protocol === "https:" ||
+  ["localhost","127.0.0.1"].includes(location.hostname);
+
+
+function ui(){
+
+  $("status").textContent =
+    S.stream
+      ? (S.ai ? "AI ON" : "Kamera ON")
+      : "Kamera OFF";
+
+  $("ai").classList.toggle("on",S.ai);
+
+  $("flash").classList.toggle("on",S.torch);
+
+  $("start").classList.toggle(
+    "hidden",
+    !!S.stream
+  );
+
+  $("flash").disabled =
+    $("switch").disabled =
+    !S.stream;
+}
+
+
+function fail(message){
+  $("error").textContent = message;
+}
+
+
+async function permission(){
+
+  if(!navigator.mediaDevices?.getUserMedia){
+
+    fail("Browser tidak mendukung kamera.");
+
+    return false;
+  }
+
+  if(!secure()){
+
+    fail("Gunakan HTTPS atau localhost.");
+
+    return false;
+  }
+
+  try{
+
+    let stream =
+      await navigator.mediaDevices.getUserMedia({
+        video:true,
+        audio:false
+      });
+
+    stream
+      .getTracks()
+      .forEach(track => track.stop());
+
+    $("permission").classList.add("hide");
+
+    return true;
+
+  }catch(error){
+
+    fail(
+      error.name === "NotAllowedError"
+        ? "Izin kamera ditolak. Aktifkan kamera di browser."
+        : "Kamera tidak dapat diakses."
+    );
+
+    return false;
+  }
+}
+
+
+async function camera(){
+
+  stop();
+
+  try{
+
+    S.stream =
+      await navigator.mediaDevices.getUserMedia({
+
+        video:{
+          facingMode:{
+            ideal:S.facing
+          },
+
+          width:{
+            ideal:1280
+          },
+
+          height:{
+            ideal:720
+          }
+        },
+
+        audio:false
+
+      });
+
+    v.srcObject = S.stream;
+
+    await v.play();
+
+    c.width = v.videoWidth;
+    c.height = v.videoHeight;
+
+    ui();
+
+  }catch(error){
+
+    fail(
+      "Gagal membuka kamera: " +
+      error.message
+    );
+
+  }
+}
+
+
+function stop(){
+
+  S.ai = false;
+
+  if(S.stream){
+
+    S.stream
+      .getTracks()
+      .forEach(track => track.stop());
+
+  }
+
+  S.stream = null;
+
+  v.srcObject = null;
+
+  x.clearRect(
+    0,
+    0,
+    c.width,
+    c.height
+  );
+
+  ui();
+}
+
+
+async function loadModel(){
+
+  if(S.model) return;
+
+  $("load").textContent =
+    "Memuat...";
+
+  try{
+
+    await tf.ready();
+
+    S.model =
+      await cocoSsd.load({
+        base:"lite_mobilenet_v2"
+      });
+
+    $("load").textContent =
+      "Model Siap";
+
+    $("hint").textContent =
+      "Model siap. Tekan AI.";
+
+  }catch(error){
+
+    $("load").textContent =
+      "Muat Model AI";
+
+    $("hint").textContent =
+      "Model gagal dimuat.";
+
+  }
+}
+
+
+async function toggleAI(){
+
+  if(!S.stream){
+
+    if(!await permission())
+      return;
+
+    await camera();
+  }
+
+  if(!S.model)
+    await loadModel();
+
+  if(!S.model)
+    return;
+
+  S.ai = !S.ai;
+
+  ui();
+
+  $("hint").textContent =
+    S.ai
+      ? "Mendeteksi objek..."
+      : "AI dimatikan";
+
+  if(S.ai)
+    detect();
+}
+
+
+async function detect(){
+
+  if(
+    !S.ai ||
+    !S.stream ||
+    !S.model
+  )
+    return;
+
+  if(
+    !S.busy &&
+    v.readyState >= 2
+  ){
+
+    S.busy = true;
+
+    try{
+
+      let predictions =
+        await S.model.detect(v);
+
+      let detected =
+        predictions.filter(
+          item =>
+            targets.includes(item.class) &&
+            item.score >= S.conf
+        );
+
+      draw(predictions);
+
+      $("count").textContent =
+        detected.length +
+        " objek";
+
+      if(detected.length)
+        save(detected);
+
+    }finally{
+
+      S.busy = false;
+    }
+  }
+
+  requestAnimationFrame(
+    detect
+  );
+}
+
+
+function draw(list){
+
+  x.clearRect(
+    0,
+    0,
+    c.width,
+    c.height
+  );
+
+  let sx =
+    c.width /
+    v.videoWidth;
+
+  let sy =
+    c.height /
+    v.videoHeight;
+
+  list.forEach(item => {
+
+    let [
+      a,
+      b,
+      w,
+      h
+    ] = item.bbox;
+
+    let target =
+      targets.includes(
+        item.class
+      );
+
+    let good =
+      item.score >= S.conf;
+
+    x.strokeStyle =
+      target
+        ? "#ec4899"
+        : "#fff";
+
+    x.lineWidth =
+      good ? 3 : 1.5;
+
+    x.strokeRect(
+      a * sx,
+      b * sy,
+      w * sx,
+      h * sy
+    );
+
+    if(target && good){
+
+      let label =
+        `${names[item.class]} ` +
+        `${(item.score * 100).toFixed(0)}%`;
+
+      x.font =
+        "bold 14px system-ui";
+
+      let width =
+        x.measureText(label).width +
+        12;
+
+      let y =
+        Math.max(
+          b * sy - 24,
+          0
+        );
+
+      x.fillStyle =
+        "#ec4899";
+
+      x.fillRect(
+        a * sx,
+        y,
+        width,
+        24
+      );
+
+      x.fillStyle =
+        "#fff";
+
+      x.fillText(
+        label,
+        a * sx + 6,
+        y + 17
+      );
+    }
+
+  });
+}
+
+
+function save(items){
+
+  let now = Date.now();
+
+  if(
+    save.last &&
+    now - save.last < 3000
+  )
+    return;
+
+  save.last = now;
+
+  S.logs.unshift({
+
+    time:
+      new Date()
+      .toLocaleString("id-ID"),
+
+    items:
+      items.map(
+        item =>
+          `${names[item.class]} ` +
+          `${(item.score * 100).toFixed(0)}%`
+      )
+
+  });
+
+  S.logs =
+    S.logs.slice(0,30);
+
+  localStorage.aiLogs =
+    JSON.stringify(S.logs);
+
+  renderLogs();
+}
+
+
+function renderLogs(){
+
+  $("logs").innerHTML =
+    S.logs
+      .map(item => `
+        <div class="log">
+          ${item.time}<br>
+          ${item.items.join(", ")}
+        </div>
+      `)
+      .join("") ||
+      "Belum ada log";
+}
+
+
+function exportCSV(){
+
+  if(!S.logs.length){
+
+    alert("Belum ada log.");
+
+    return;
+  }
+
+  let csv =
+    "Waktu,Deteksi\n" +
+    S.logs
+      .map(item =>
+        `"${item.time}","${item.items.join("; ")}"`
+      )
+      .join("\n");
+
+  let a =
+    document.createElement("a");
+
+  a.href =
+    URL.createObjectURL(
+      new Blob(
+        ["\ufeff" + csv],
+        {
+          type:"text/csv"
+        }
+      )
+    );
+
+  a.download =
+    "detection-log.csv";
+
+  a.click();
+}
+
+
+$("allow").onclick =
+  async () => {
+
+    if(await permission())
+      camera();
+
+  };
+
+
+$("start").onclick =
+  async () => {
+
+    if(await permission())
+      camera();
+
+  };
+
+
+$("switch").onclick =
+  async () => {
+
+    S.facing =
+      S.facing === "environment"
+        ? "user"
+        : "environment";
+
+    S.torch = false;
+
+    await camera();
+
+  };
+
+
+$("flash").onclick =
+  async () => {
+
+    let track =
+      S.stream
+        ?.getVideoTracks()[0];
+
+    let capabilities =
+      track?.getCapabilities?.();
+
+    if(!capabilities?.torch){
+
+      alert(
+        "Flash tidak didukung."
+      );
+
+      return;
+    }
+
+    S.torch = !S.torch;
+
+    try{
+
+      await track.applyConstraints({
+        advanced:[
+          {
+            torch:S.torch
+          }
+        ]
+      });
+
+    }catch{
+
+      S.torch = false;
+
+    }
+
+    ui();
+  };
+
+
+$("ai").onclick =
+  toggleAI;
+
+
+$("load").onclick =
+  loadModel;
+
+
+$("export").onclick =
+  exportCSV;
+
+
+$("conf").oninput =
+  event => {
+
+    S.conf =
+      event.target.value / 100;
+
+    $("confText").textContent =
+      event.target.value + "%";
+
+  };
+
+
+S.logs =
+  JSON.parse(
+    localStorage.aiLogs || "[]"
+  );
+
+renderLogs();
+ui();
+
+</script>
+
+</body>
+</html>
